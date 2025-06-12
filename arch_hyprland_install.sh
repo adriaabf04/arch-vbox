@@ -439,11 +439,6 @@ if [ ! -f /etc/arch-release ]; then
     error "Este script debe ejecutarse desde el ISO live de Arch Linux"
 fi
 
-# Verificar si ya estamos en un sistema instalado
-if [ -d /home ]; then
-    error "Parece que ya tienes un sistema instalado. Este script es para instalación limpia."
-fi
-
 log "¡Bienvenido al instalador automático de Arch Linux + Hyprland!"
 log "Este proceso:"
 log "1. Particionará completamente /dev/sda"
