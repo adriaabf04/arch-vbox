@@ -117,7 +117,7 @@ EOF
     log "Instalando paquetes base (esto puede tardar varios minutos)..."
     pacstrap /mnt base linux linux-firmware networkmanager sudo nano git \
         pipewire wireplumber pipewire-audio pipewire-pulse mesa \
-        xf86-video-vmware virtualbox-guest-utils polkit grub efibootmgr
+        virtualbox-guest-utils polkit grub efibootmgr
     
     success "Sistema base instalado"
     
