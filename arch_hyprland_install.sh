@@ -1,9 +1,15 @@
 #!/bin/bash
 # =============================================================================
-# SCRIPT DE INSTALACIÓN AUTOMÁTICA: ARCH LINUX + HYPRLAND PARA VIRTUALBOX
+# ARCH LINUX + HYPRLAND INSTALLATION SCRIPT - FASE 1
+# Script para ejecutar desde el entorno live de Arch Linux
 # =============================================================================
 
-set -e  # Salir si hay algún error
+set -e
+
+echo "==========================================="
+echo "ARCH LINUX + HYPRLAND - FASE 1"
+echo "Configuración inicial y particionado"
+echo "==========================================="
 
 # Colores para output
 RED='\033[0;31m'
@@ -12,234 +18,269 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Función para logging
-log() {
-    echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $1"
+print_step() {
+    echo -e "${BLUE}[PASO]${NC} $1"
 }
 
-error() {
+print_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[AVISO]${NC} $1"
+}
+
+print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Función para preguntar al usuario
+ask_user() {
+    local question="$1"
+    local default="$2"
+    local response
+    
+    if [ -n "$default" ]; then
+        read -p "$question [$default]: " response
+        response=${response:-$default}
+    else
+        read -p "$question: " response
+    fi
+    
+    echo "$response"
+}
+
+print_step "Verificando conexión a internet..."
+if ping -c 1 archlinux.org &> /dev/null; then
+    print_success "Conexión a internet OK"
+else
+    print_error "Sin conexión a internet. Verifica la configuración de red."
     exit 1
-}
+fi
 
-success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
+print_step "Configurando teclado español..."
+loadkeys es
+print_success "Teclado configurado"
 
-warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
+print_step "Sincronizando reloj del sistema..."
+timedatectl set-ntp true
+print_success "Reloj sincronizado"
 
-# =============================================================================
-# FASE 1: PREPARACIÓN DEL SISTEMA LIVE
-# =============================================================================
+print_step "Actualizando lista de mirrors..."
+pacman -Sy --noconfirm
+print_success "Mirrors actualizados"
 
-fase1_preparacion() {
-    log "Iniciando Fase 1: Preparación del sistema live"
-    
-    # Verificar conexión a internet
-    if ! ping -c 1 archlinux.org > /dev/null 2>&1; then
-        error "No hay conexión a internet. Verifica la configuración de red."
-    fi
-    success "Conexión a internet verificada"
-    
-    # Configurar teclado español
-    loadkeys es
-    success "Teclado configurado en español"
-    
-    # Sincronizar reloj
-    timedatectl set-ntp true
-    success "Reloj sincronizado"
-    
-    # Actualizar keyring
-    pacman -Sy --noconfirm archlinux-keyring
-    success "Keyring actualizado"
-}
+print_step "Mostrando discos disponibles:"
+lsblk
+echo ""
 
-# =============================================================================
-# FASE 2: PARTICIONADO AUTOMÁTICO
-# =============================================================================
+# Configuración de disco
+DISK=$(ask_user "¿Qué disco quieres usar? (por defecto /dev/sda)" "/dev/sda")
 
-fase2_particionado() {
-    log "Iniciando Fase 2: Particionado automático"
-    
-    DISK="/dev/sda"
-    
-    # Verificar que el disco existe
-    if [ ! -b "$DISK" ]; then
-        error "Disco $DISK no encontrado"
-    fi
-    
-    warning "¡ATENCIÓN! Se va a particionar completamente $DISK"
-    warning "Todos los datos se perderán. Presiona Enter para continuar o Ctrl+C para cancelar"
-    read
-    
-    # Limpiar disco y crear tabla de particiones GPT
-    wipefs -af "$DISK"
-    parted "$DISK" --script mklabel gpt
-    
-    # Crear particiones
-    parted "$DISK" --script mkpart ESP fat32 1MiB 513MiB
-    parted "$DISK" --script set 1 esp on
-    parted "$DISK" --script mkpart primary ext4 513MiB 100%
-    
-    success "Particiones creadas"
-    
-    # Formatear particiones
-    mkfs.fat -F32 "${DISK}1"
-    mkfs.ext4 -F "${DISK}2"
-    
-    success "Particiones formateadas"
-    
-    # Montar particiones
-    mount "${DISK}2" /mnt
-    mkdir -p /mnt/boot
-    mount "${DISK}1" /mnt/boot
-    
-    success "Particiones montadas"
-}
+if [ ! -b "$DISK" ]; then
+    print_error "El disco $DISK no existe"
+    exit 1
+fi
 
-# =============================================================================
-# FASE 3: INSTALACIÓN DEL SISTEMA BASE
-# =============================================================================
+print_warning "¡ATENCIÓN! Esto borrará TODOS los datos en $DISK"
+CONFIRM=$(ask_user "¿Continuar? (sí/no)" "no")
 
-fase3_sistema_base() {
-    log "Iniciando Fase 3: Instalación del sistema base"
-    
-    # Actualizar mirrors para España
-    cat > /etc/pacman.d/mirrorlist << 'EOF'
-Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch
-Server = https://archlinux.mirror.wearetriple.com/$repo/os/$arch
-Server = https://mirror.cj2.nl/archlinux/$repo/os/$arch
-EOF
-    
-    # Instalar sistema base con paquetes para Hyprland
-    log "Instalando paquetes base (esto puede tardar varios minutos)..."
-    pacstrap /mnt base linux linux-firmware networkmanager sudo nano git \
-        pipewire wireplumber pipewire-audio pipewire-pulse mesa \
-        virtualbox-guest-utils polkit grub efibootmgr
-    
-    success "Sistema base instalado"
-    
-    # Generar fstab
-    genfstab -U /mnt >> /mnt/etc/fstab
-    success "fstab generado"
-}
+if [ "$CONFIRM" != "sí" ] && [ "$CONFIRM" != "si" ] && [ "$CONFIRM" != "yes" ]; then
+    print_error "Instalación cancelada por el usuario"
+    exit 1
+fi
 
-# =============================================================================
-# FASE 4: CONFIGURACIÓN DEL SISTEMA
-# =============================================================================
+print_step "Particionando disco $DISK..."
 
-fase4_configuracion() {
-    log "Iniciando Fase 4: Configuración del sistema"
-    
-    # Crear script de configuración para chroot
-    cat > /mnt/config_chroot.sh << 'CHROOT_EOF'
+# Crear tabla de particiones GPT
+parted $DISK --script mklabel gpt
+
+# Crear partición EFI (512MB)
+parted $DISK --script mkpart primary fat32 1MiB 513MiB
+parted $DISK --script set 1 esp on
+
+# Crear partición raíz (resto del espacio)
+parted $DISK --script mkpart primary ext4 513MiB 100%
+
+print_success "Particionado completado"
+
+# Variables de particiones
+EFI_PARTITION="${DISK}1"
+ROOT_PARTITION="${DISK}2"
+
+print_step "Formateando particiones..."
+
+# Formatear partición EFI
+mkfs.fat -F32 "$EFI_PARTITION"
+print_success "Partición EFI formateada"
+
+# Formatear partición raíz
+mkfs.ext4 -F "$ROOT_PARTITION"
+print_success "Partición raíz formateada"
+
+print_step "Montando particiones..."
+
+# Montar partición raíz
+mount "$ROOT_PARTITION" /mnt
+
+# Crear y montar directorio boot
+mkdir /mnt/boot
+mount "$EFI_PARTITION" /mnt/boot
+
+print_success "Particiones montadas"
+
+print_step "Instalando sistema base..."
+pacstrap /mnt base linux linux-firmware networkmanager sudo nano git \
+    pipewire wireplumber pipewire-audio pipewire-pulse mesa \
+    xf86-video-vmware virtualbox-guest-utils polkit
+
+print_success "Sistema base instalado"
+
+print_step "Generando fstab..."
+genfstab -U /mnt >> /mnt/etc/fstab
+print_success "fstab generado"
+
+print_step "Copiando script de fase 2 al sistema instalado..."
+
+cat > /mnt/phase2.sh << 'EOFSCRIPT'
 #!/bin/bash
+# =============================================================================
+# ARCH LINUX + HYPRLAND INSTALLATION SCRIPT - FASE 2
+# Script para ejecutar dentro del chroot
+# =============================================================================
+
 set -e
 
-# Configurar zona horaria
+# Colores
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_step() {
+    echo -e "${BLUE}[PASO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+ask_user() {
+    local question="$1"
+    local default="$2"
+    local response
+    
+    if [ -n "$default" ]; then
+        read -p "$question [$default]: " response
+        response=${response:-$default}
+    else
+        read -p "$question: " response
+    fi
+    
+    echo "$response"
+}
+
+echo "==========================================="
+echo "ARCH LINUX + HYPRLAND - FASE 2"
+echo "Configuración del sistema"
+echo "==========================================="
+
+print_step "Configurando zona horaria..."
 ln -sf /usr/share/zoneinfo/Europe/Madrid /etc/localtime
 hwclock --systohc
+print_success "Zona horaria configurada"
 
-# Configurar idioma
+print_step "Configurando idioma..."
 sed -i 's/#es_ES.UTF-8 UTF-8/es_ES.UTF-8 UTF-8/' /etc/locale.gen
 sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 locale-gen
 echo 'LANG=es_ES.UTF-8' > /etc/locale.conf
 echo 'KEYMAP=es' > /etc/vconsole.conf
+print_success "Idioma configurado"
 
-# Configurar hostname
-echo 'arch-hyprland' > /etc/hostname
+print_step "Configurando hostname..."
+HOSTNAME=$(ask_user "Nombre del equipo" "archlinux")
+echo "$HOSTNAME" > /etc/hostname
 
-# Configurar hosts
-cat > /etc/hosts << 'EOF'
+cat > /etc/hosts << EOF
 127.0.0.1   localhost
 ::1         localhost
-127.0.1.1   arch-hyprland.localdomain   arch-hyprland
+127.0.1.1   $HOSTNAME.localdomain   $HOSTNAME
 EOF
+print_success "Hostname configurado: $HOSTNAME"
 
-# Configurar usuario y contraseñas
-echo "Configurando contraseña de root (usa: arch123)"
-echo 'root:arch123' | chpasswd
-
-# Crear usuario
-useradd -m -G wheel -s /bin/bash usuario
-echo 'usuario:usuario123' | chpasswd
-
-# Configurar sudo
-sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
-
-# Instalar bootloader
+print_step "Instalando GRUB..."
+pacman -S --noconfirm grub efibootmgr
 grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 grub-mkconfig -o /boot/grub/grub.cfg
+print_success "GRUB instalado"
 
-# Habilitar servicios
+print_step "Configurando contraseña de root..."
+echo "Establece una contraseña para root:"
+passwd
+
+print_step "Creando usuario..."
+USERNAME=$(ask_user "Nombre de usuario" "usuario")
+useradd -m -G wheel -s /bin/bash "$USERNAME"
+echo "Establece una contraseña para $USERNAME:"
+passwd "$USERNAME"
+
+print_step "Configurando sudo..."
+sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+print_success "Sudo configurado"
+
+print_step "Habilitando servicios..."
 systemctl enable NetworkManager
 systemctl enable vboxservice
+print_success "Servicios habilitados"
 
-echo "Configuración del sistema completada"
-CHROOT_EOF
-
-    # Ejecutar configuración en chroot
-    chmod +x /mnt/config_chroot.sh
-    arch-chroot /mnt /config_chroot.sh
-    rm /mnt/config_chroot.sh
-    
-    success "Sistema configurado"
-}
-
-# =============================================================================
-# FUNCIÓN PRINCIPAL PARA FASE 1-4 (PRE-REBOOT)
-# =============================================================================
-
-instalar_sistema_base() {
-    log "=== INSTALACIÓN AUTOMÁTICA DE ARCH LINUX ==="
-    log "Esta instalación incluirá:"
-    log "- Arch Linux base"
-    log "- Configuración para VirtualBox"
-    log "- Preparación para Hyprland"
-    
-    fase1_preparacion
-    fase2_particionado
-    fase3_sistema_base
-    fase4_configuracion
-    
-    success "¡Instalación del sistema base completada!"
-    warning "El sistema se reiniciará en 10 segundos..."
-    warning "Después del reinicio, ejecuta la segunda parte del script"
-    
-    # Crear script para post-instalación
-    cat > /mnt/home/usuario/install_hyprland.sh << 'POST_EOF'
+print_step "Creando script de fase 3..."
+cat > /home/$USERNAME/phase3.sh << 'EOFPHASE3'
 #!/bin/bash
 # =============================================================================
-# FASE 5: INSTALACIÓN POST-REBOOT - HYPRLAND
+# ARCH LINUX + HYPRLAND INSTALLATION SCRIPT - FASE 3
+# Script para ejecutar después del primer reinicio como usuario normal
 # =============================================================================
 
 set -e
 
+# Colores
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log() { echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $1"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+print_step() {
+    echo -e "${BLUE}[PASO]${NC} $1"
+}
 
-log "=== INSTALACIÓN DE HYPRLAND ==="
+print_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
 
-# Actualizar sistema
+echo "==========================================="
+echo "ARCH LINUX + HYPRLAND - FASE 3"
+echo "Instalación de Hyprland"
+echo "==========================================="
+
+print_step "Actualizando sistema..."
 sudo pacman -Syu --noconfirm
+print_success "Sistema actualizado"
 
-# Instalar Hyprland y dependencias
-log "Instalando Hyprland y aplicaciones..."
+print_step "Instalando Hyprland y componentes..."
 sudo pacman -S --noconfirm hyprland hyprpaper xdg-desktop-portal-hyprland \
     waybar wofi kitty sddm firefox thunar grim slurp wl-clipboard \
-    brightnessctl pamixer ttf-jetbrains-mono noto-fonts
+    brightnessctl pamixer ttf-jetbrains-mono noto-fonts noto-fonts-emoji
 
-# Configurar SDDM
+print_success "Hyprland instalado"
+
+print_step "Configurando SDDM..."
+sudo systemctl enable sddm
+
 sudo mkdir -p /etc/sddm.conf.d
-sudo tee /etc/sddm.conf.d/hyprland.conf > /dev/null << 'EOF'
+sudo tee /etc/sddm.conf.d/hyprland.conf << EOF
 [Theme]
 Current=breeze
 
@@ -247,22 +288,31 @@ Current=breeze
 SessionDir=/usr/share/wayland-sessions
 EOF
 
-sudo systemctl enable sddm
+print_success "SDDM configurado"
 
-# Crear configuraciones
-mkdir -p ~/.config/{hypr,waybar}
+print_step "Creando configuración de Hyprland..."
+mkdir -p ~/.config/hypr
 
-# Configuración de Hyprland
-tee ~/.config/hypr/hyprland.conf > /dev/null << 'EOF'
+tee ~/.config/hypr/hyprland.conf << 'EOF'
+# Monitor configuration
 monitor=,preferred,auto,1
 
+# Input configuration
 input {
     kb_layout = es
+    kb_variant =
+    kb_model =
+    kb_options =
+    kb_rules =
+    
     follow_mouse = 1
-    touchpad { natural_scroll = no }
+    touchpad {
+        natural_scroll = no
+    }
     sensitivity = 0
 }
 
+# General settings
 general {
     gaps_in = 5
     gaps_out = 10
@@ -272,6 +322,7 @@ general {
     layout = dwindle
 }
 
+# Decoration
 decoration {
     rounding = 10
     blur {
@@ -285,21 +336,30 @@ decoration {
     col.shadow = rgba(1a1a1aee)
 }
 
+# Animations
 animations {
     enabled = yes
     bezier = myBezier, 0.05, 0.9, 0.1, 1.05
     animation = windows, 1, 7, myBezier
     animation = windowsOut, 1, 7, default, popin 80%
     animation = border, 1, 10, default
+    animation = borderangle, 1, 8, default
     animation = fade, 1, 7, default
     animation = workspaces, 1, 6, default
 }
 
+# Layout
 dwindle {
     pseudotile = yes
     preserve_split = yes
 }
 
+# Window rules
+windowrule = float, ^(kitty)$
+windowrule = center, ^(kitty)$
+windowrule = size 800 600, ^(kitty)$
+
+# Key bindings
 $mainMod = SUPER
 
 bind = $mainMod, Q, exec, kitty
@@ -308,146 +368,470 @@ bind = $mainMod, M, exit,
 bind = $mainMod, E, exec, thunar
 bind = $mainMod, V, togglefloating,
 bind = $mainMod, R, exec, wofi --show drun
+bind = $mainMod, P, pseudo,
+bind = $mainMod, J, togglesplit,
 bind = $mainMod, F, exec, firefox
 
+# Move focus
 bind = $mainMod, left, movefocus, l
 bind = $mainMod, right, movefocus, r
 bind = $mainMod, up, movefocus, u
 bind = $mainMod, down, movefocus, d
 
+# Switch workspaces
 bind = $mainMod, 1, workspace, 1
 bind = $mainMod, 2, workspace, 2
 bind = $mainMod, 3, workspace, 3
 bind = $mainMod, 4, workspace, 4
 bind = $mainMod, 5, workspace, 5
+bind = $mainMod, 6, workspace, 6
+bind = $mainMod, 7, workspace, 7
+bind = $mainMod, 8, workspace, 8
+bind = $mainMod, 9, workspace, 9
+bind = $mainMod, 0, workspace, 10
 
+# Move active window to workspace
 bind = $mainMod SHIFT, 1, movetoworkspace, 1
 bind = $mainMod SHIFT, 2, movetoworkspace, 2
 bind = $mainMod SHIFT, 3, movetoworkspace, 3
 bind = $mainMod SHIFT, 4, movetoworkspace, 4
 bind = $mainMod SHIFT, 5, movetoworkspace, 5
+bind = $mainMod SHIFT, 6, movetoworkspace, 6
+bind = $mainMod SHIFT, 7, movetoworkspace, 7
+bind = $mainMod SHIFT, 8, movetoworkspace, 8
+bind = $mainMod SHIFT, 9, movetoworkspace, 9
+bind = $mainMod SHIFT, 0, movetoworkspace, 10
 
+# Screenshot
+bind = , Print, exec, grim -g "$(slurp)" - | wl-copy
+
+# Audio
+bind = , XF86AudioRaiseVolume, exec, pamixer -i 5
+bind = , XF86AudioLowerVolume, exec, pamixer -d 5
+bind = , XF86AudioMute, exec, pamixer -t
+
+# Mouse bindings
 bindm = $mainMod, mouse:272, movewindow
 bindm = $mainMod, mouse:273, resizewindow
 
+# Autostart
 exec-once = waybar
 exec-once = hyprpaper
 EOF
 
-# Configuración de Waybar
-tee ~/.config/waybar/config > /dev/null << 'EOF'
+print_success "Configuración de Hyprland creada"
+
+print_step "Configurando Waybar..."
+mkdir -p ~/.config/waybar
+
+tee ~/.config/waybar/config << 'EOF'
 {
     "layer": "top",
     "position": "top",
     "height": 30,
+    "spacing": 4,
     "modules-left": ["hyprland/workspaces"],
     "modules-center": ["hyprland/window"],
     "modules-right": ["pulseaudio", "network", "cpu", "memory", "clock"],
     
     "hyprland/workspaces": {
         "disable-scroll": true,
+        "all-outputs": true,
         "format": "{icon}",
         "format-icons": {
+            "1": "",
+            "2": "",
+            "3": "",
+            "4": "",
+            "5": "",
             "urgent": "",
             "focused": "",
             "default": ""
         }
     },
     
-    "clock": { "format": "{:%H:%M - %d/%m/%Y}" },
-    "cpu": { "format": "  {usage}%" },
-    "memory": { "format": "  {}%" },
+    "hyprland/window": {
+        "format": "{}",
+        "max-length": 50
+    },
+    
+    "clock": {
+        "format": "{:%H:%M - %d/%m/%Y}",
+        "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>"
+    },
+    
+    "cpu": {
+        "format": "  {usage}%",
+        "tooltip": false
+    },
+    
+    "memory": {
+        "format": "  {}%"
+    },
+    
     "network": {
         "format-wifi": "  {signalStrength}%",
         "format-ethernet": "  Connected",
-        "format-disconnected": "  Disconnected"
+        "format-linked": "  {ifname} (No IP)",
+        "format-disconnected": "⚠  Disconnected",
+        "format-alt": "{ifname}: {ipaddr}/{cidr}"
     },
+    
     "pulseaudio": {
         "format": "{icon} {volume}%",
+        "format-bluetooth": "{icon} {volume}% ",
+        "format-bluetooth-muted": " {icon}",
         "format-muted": " Muted",
-        "format-icons": ["", "", ""]
+        "format-source": "{volume}% ",
+        "format-source-muted": "",
+        "format-icons": {
+            "headphone": "",
+            "hands-free": "",
+            "headset": "",
+            "phone": "",
+            "portable": "",
+            "car": "",
+            "default": ["", "", ""]
+        },
+        "on-click": "pavucontrol"
     }
 }
 EOF
 
-# Estilo de Waybar
-tee ~/.config/waybar/style.css > /dev/null << 'EOF'
+tee ~/.config/waybar/style.css << 'EOF'
 * {
+    border: none;
+    border-radius: 0;
     font-family: "JetBrains Mono", monospace;
-    font-size: 14px;
+    font-weight: bold;
+    font-size: 13px;
     min-height: 0;
 }
 
 window#waybar {
-    background: rgba(43, 48, 59, 0.9);
+    background-color: rgba(43, 48, 59, 0.9);
     border-bottom: 3px solid rgba(100, 114, 125, 0.5);
     color: #ffffff;
+    transition-property: background-color;
+    transition-duration: .5s;
+}
+
+button {
+    box-shadow: inset 0 -3px transparent;
+    border: none;
+    border-radius: 0;
 }
 
 #workspaces button {
     padding: 0 5px;
-    background: transparent;
+    background-color: transparent;
     color: #ffffff;
-    border: none;
+}
+
+#workspaces button:hover {
+    background: rgba(0, 0, 0, 0.2);
 }
 
 #workspaces button.focused {
-    background: #64727D;
+    background-color: #64727D;
+    box-shadow: inset 0 -3px #ffffff;
 }
 
-#clock, #cpu, #memory, #network, #pulseaudio {
+#workspaces button.urgent {
+    background-color: #eb4d4b;
+}
+
+#mode {
+    background-color: #64727D;
+    border-bottom: 3px solid #ffffff;
+}
+
+#clock,
+#battery,
+#cpu,
+#memory,
+#disk,
+#temperature,
+#backlight,
+#network,
+#pulseaudio,
+#custom-media,
+#tray,
+#mode,
+#idle_inhibitor,
+#mpd {
     padding: 0 10px;
-    margin: 0 5px;
+    color: #ffffff;
+}
+
+#window,
+#workspaces {
+    margin: 0 4px;
+}
+
+#clock {
+    background-color: #64727D;
+}
+
+#battery {
+    background-color: #ffffff;
+    color: #000000;
+}
+
+#battery.charging, #battery.plugged {
+    color: #ffffff;
+    background-color: #26A65B;
+}
+
+@keyframes blink {
+    to {
+        background-color: #ffffff;
+        color: #000000;
+    }
+}
+
+#battery.critical:not(.charging) {
+    background-color: #f53c3c;
+    color: #ffffff;
+    animation-name: blink;
+    animation-duration: 0.5s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+
+#cpu {
+    background-color: #2ecc71;
+    color: #000000;
+}
+
+#memory {
+    background-color: #9b59b6;
+}
+
+#disk {
+    background-color: #964B00;
+}
+
+#backlight {
+    background-color: #90b1b1;
+}
+
+#network {
+    background-color: #2980b9;
+}
+
+#network.disconnected {
+    background-color: #f53c3c;
+}
+
+#pulseaudio {
+    background-color: #f1c40f;
+    color: #000000;
+}
+
+#pulseaudio.muted {
+    background-color: #90b1b1;
+    color: #2a5c45;
+}
+
+#tray {
+    background-color: #2980b9;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: #eb4d4b;
+}
+
+#idle_inhibitor {
+    background-color: #2d3748;
+}
+
+#idle_inhibitor.activated {
+    background-color: #ecf0f1;
+    color: #2d3748;
+}
+
+#mpd {
+    background-color: #66cc99;
+    color: #2a5c45;
+}
+
+#mpd.disconnected {
+    background-color: #f53c3c;
+}
+
+#mpd.stopped {
+    background-color: #90b1b1;
+}
+
+#mpd.paused {
+    background-color: #51a37a;
 }
 EOF
 
-# Configurar fondo de pantalla
-echo 'preload = /usr/share/pixmaps/archlinux-logo.png' > ~/.config/hypr/hyprpaper.conf
-echo 'wallpaper = ,/usr/share/pixmaps/archlinux-logo.png' >> ~/.config/hypr/hyprpaper.conf
+print_success "Waybar configurado"
 
-success "¡Hyprland instalado y configurado!"
-log "Credenciales del sistema:"
-log "  Usuario: usuario | Contraseña: usuario123"
-log "  Root: root | Contraseña: arch123"
-log ""
-log "Atajos básicos de Hyprland:"
-log "  Super + Q: Terminal"
-log "  Super + R: Lanzador de apps"
-log "  Super + E: Explorador de archivos"
-log "  Super + F: Firefox"
-log "  Super + C: Cerrar ventana"
-log "  Super + M: Salir"
-log ""
-log "El sistema se reiniciará para iniciar SDDM..."
-sleep 5
-sudo reboot
-POST_EOF
+print_step "Configurando fondo de pantalla..."
+mkdir -p ~/.config/hypr
 
-    chmod +x /mnt/home/usuario/install_hyprland.sh
-    
-    sleep 10
-    umount -R /mnt
-    reboot
+# Crear un fondo de pantalla simple con colores
+tee ~/.config/hypr/hyprpaper.conf << 'EOF'
+preload = ~/.config/hypr/wallpaper.jpg
+wallpaper = ,~/.config/hypr/wallpaper.jpg
+EOF
+
+# Crear un fondo de pantalla simple
+convert -size 1920x1080 gradient:blue-purple ~/.config/hypr/wallpaper.jpg 2>/dev/null || {
+    # Si ImageMagick no está disponible, crear un archivo de color sólido
+    echo "Descargando fondo de pantalla de ejemplo..."
+    curl -s -o ~/.config/hypr/wallpaper.jpg "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&h=1080&fit=crop&crop=entropy&cs=tinysrgb" || {
+        # Si no hay internet, crear un archivo vacío
+        touch ~/.config/hypr/wallpaper.jpg
+    }
 }
 
-# =============================================================================
-# EJECUCIÓN PRINCIPAL
-# =============================================================================
+print_success "Fondo de pantalla configurado"
 
-# Verificar si estamos en el sistema live de Arch
-if [ ! -f /etc/arch-release ]; then
-    error "Este script debe ejecutarse desde el ISO live de Arch Linux"
-fi
+print_step "Configurando Wofi (lanzador de aplicaciones)..."
+mkdir -p ~/.config/wofi
 
-log "¡Bienvenido al instalador automático de Arch Linux + Hyprland!"
-log "Este proceso:"
-log "1. Particionará completamente /dev/sda"
-log "2. Instalará Arch Linux base"
-log "3. Configurará el sistema para VirtualBox"
-log "4. Preparará la instalación de Hyprland"
-log ""
-warning "¡TODOS LOS DATOS EN /dev/sda SE PERDERÁN!"
-warning "Presiona Enter para continuar o Ctrl+C para cancelar"
-read
+tee ~/.config/wofi/config << 'EOF'
+width=600
+height=400
+location=center
+show=drun
+prompt=Aplicaciones
+filter_rate=100
+allow_markup=true
+no_actions=true
+halign=fill
+orientation=vertical
+content_halign=fill
+insensitive=true
+allow_images=true
+image_size=40
+gtk_dark=true
+EOF
 
-instalar_sistema_base
+tee ~/.config/wofi/style.css << 'EOF'
+window {
+margin: 0px;
+border: 2px solid #1e1e2e;
+background-color: #181825;
+border-radius: 10px;
+}
+
+#input {
+margin: 5px;
+border: 2px solid #313244;
+color: #cdd6f4;
+background-color: #1e1e2e;
+border-radius: 10px;
+}
+
+#inner-box {
+margin: 5px;
+border: none;
+background-color: #181825;
+border-radius: 10px;
+}
+
+#outer-box {
+margin: 5px;
+border: none;
+background-color: #181825;
+border-radius: 10px;
+}
+
+#scroll {
+margin: 0px;
+border: none;
+}
+
+#text {
+margin: 5px;
+border: none;
+color: #cdd6f4;
+}
+
+#entry:selected {
+background-color: #313244;
+border-radius: 10px;
+}
+
+#text:selected {
+color: #cdd6f4;
+}
+EOF
+
+print_success "Wofi configurado"
+
+echo ""
+echo "==========================================="
+echo "¡INSTALACIÓN COMPLETADA!"
+echo "==========================================="
+echo ""
+echo "Hyprland está instalado y configurado."
+echo "Reinicia el sistema para usar SDDM y Hyprland."
+echo ""
+echo "Atajos de teclado principales:"
+echo "  Super + Q      : Terminal (kitty)"
+echo "  Super + R      : Lanzador de aplicaciones (wofi)"
+echo "  Super + E      : Explorador de archivos (thunar)"
+echo "  Super + F      : Firefox"
+echo "  Super + C      : Cerrar ventana"
+echo "  Super + V      : Alternar ventana flotante"
+echo "  Super + M      : Salir de Hyprland"
+echo "  Super + 1-9    : Cambiar workspace"
+echo "  Print          : Captura de pantalla"
+echo ""
+echo "Para reiniciar: sudo reboot"
+echo ""
+
+EOFPHASE3
+
+chown $USERNAME:$USERNAME /home/$USERNAME/phase3.sh
+chmod +x /home/$USERNAME/phase3.sh
+
+print_success "Script de fase 3 creado en /home/$USERNAME/phase3.sh"
+
+echo ""
+echo "==========================================="
+echo "FASE 2 COMPLETADA"
+echo "==========================================="
+echo ""
+echo "El sistema base está configurado."
+echo "Saldrás del chroot y podrás reiniciar."
+echo ""
+echo "Después del reinicio:"
+echo "1. Inicia sesión como $USERNAME"
+echo "2. Ejecuta: ./phase3.sh"
+echo "3. Reinicia para usar Hyprland"
+echo ""
+
+EOFSCRIPT
+
+chmod +x /mnt/phase2.sh
+
+print_success "Script de fase 2 copiado"
+
+echo ""
+echo "==========================================="
+echo "FASE 1 COMPLETADA"
+echo "==========================================="
+echo ""
+echo "Ahora ejecuta los siguientes comandos:"
+echo "1. arch-chroot /mnt"
+echo "2. ./phase2.sh"
+echo "3. exit"
+echo "4. umount -R /mnt"
+echo "5. reboot"
+echo ""
+echo "Después del reinicio, ejecuta ./phase3.sh como usuario normal"
+echo ""
