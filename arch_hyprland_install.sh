@@ -132,7 +132,7 @@ print_success "Particiones montadas"
 print_step "Instalando sistema base..."
 pacstrap /mnt base linux linux-firmware networkmanager sudo nano git \
     pipewire wireplumber pipewire-audio pipewire-pulse mesa \
-    xf86-video-vmware virtualbox-guest-utils polkit
+    virtualbox-guest-utils polkit
 
 print_success "Sistema base instalado"
 
